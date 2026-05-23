@@ -1,0 +1,214 @@
+# Sunrise - Render Blueprint
+# Deploy the entire Solar System on Render.
+#
+# Prerequisites:
+#   1. Fork/clone this repo and connect it to Render
+#   2. Create two Redis instances in Dashboard: sunrise-redis + observatory-redis
+#   3. Update REDIS_HOST env vars below with the actual internal URLs
+#   4. Fill in all sync:false secrets when prompted
+#   5. After deploy, add custom domains to services if desired
+#
+# Service URLs (default):
+#   Sunset (frontend):  https://sunset-website.onrender.com
+#   Sunrise (API):      https://sunrise-server.onrender.com
+#   Observatory:        https://observatory.onrender.com
+#   Grafana:            https://grafana.onrender.com
+
+services:
+  # ---------------------------------------------------------------
+  # MySQL Database (Worker - no public URL)
+  # ---------------------------------------------------------------
+  - type: worker
+    name: mysql
+    runtime: docker
+    dockerfilePath: ./lib/docker/mysql.Render.Dockerfile
+    disk:
+      name: mysql-data
+      mountPath: /var/lib/mysql
+      sizeGB: 10
+    envVars:
+      - key: MYSQL_ROOT_PASSWORD
+        sync: false
+      - key: MYSQL_DATABASE
+        value: sunrise
+      - key: MYSQL_USER
+        value: sunrise
+      - key: MYSQL_PASSWORD
+        sync: false
+    numInstances: 1
+
+  # ---------------------------------------------------------------
+  # Sunrise Server (ASP.NET API) - Internal
+  # ---------------------------------------------------------------
+  - type: web
+    name: sunrise-server
+    runtime: docker
+    dockerfilePath: ./Sunrise/Dockerfile.Render
+    envVars:
+      - key: PORT
+        value: 3912
+      - key: ASPNETCORE_URLS
+        value: http://+:3912
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: API_TOKEN_SECRET
+        sync: false
+      - key: OBSERVATORY_HOST
+        value: observatory
+      - key: OBSERVATORY_PORT
+        value: 3000
+      - key: OBSERVATORY_API_KEY
+        sync: false
+      - key: MYSQL_HOST
+        value: mysql
+      - key: MYSQL_PORT
+        value: 3306
+      - key: MYSQL_USER
+        value: sunrise
+      - key: MYSQL_PASSWORD
+        sync: false
+      - key: MYSQL_DATABASE
+        value: sunrise
+      - key: HANGFIRE_HOST
+        value: mysql
+      - key: HANGFIRE_PORT
+        value: 3306
+      - key: HANGFIRE_USER
+        value: sunrise
+      - key: HANGFIRE_PASSWORD
+        sync: false
+      - key: REDIS_HOST
+        value: sunrise-redis
+      - key: REDIS_PORT
+        value: 6379
+      - key: WEB_DOMAIN
+        value: sunset-website.onrender.com
+      - key: API__AllowedOrigins__0
+        value: https://sunset-website.onrender.com
+      - key: API__AllowedOrigins__1
+        value: http://localhost:3000
+    disk:
+      name: sunrise-data
+      mountPath: /app/Data
+      sizeGB: 5
+    healthCheckPath: /health
+    numInstances: 1
+
+  # ---------------------------------------------------------------
+  # Observatory (Beatmap API) - Internal
+  # ---------------------------------------------------------------
+  - type: web
+    name: observatory
+    runtime: docker
+    dockerfilePath: ./Observatory/Dockerfile
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_HOST
+        value: observatory-redis
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: observatory-postgres
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: observatory-postgres
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: observatory-postgres
+          property: database
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: observatory-postgres
+          property: hostname
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: observatory-postgres
+          property: port
+      - key: BANCHO_CLIENT_ID
+        sync: false
+      - key: BANCHO_CLIENT_SECRET
+        sync: false
+      - key: IGNORE_RATELIMIT_KEY
+        sync: false
+    disk:
+      name: observatory-data
+      mountPath: /usr/src/app/data
+      sizeGB: 5
+    healthCheckPath: /
+    numInstances: 1
+
+  # ---------------------------------------------------------------
+  # Sunset Website (Next.js Frontend) - Public
+  # ---------------------------------------------------------------
+  - type: web
+    name: sunset-website
+    runtime: docker
+    dockerfilePath: ./lib/docker/Sunset.Dockerfile
+    envVars:
+      - key: NEXT_PUBLIC_SERVER_DOMAIN
+        value: sunset-website.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        value: https://sunrise-server.onrender.com
+      - key: NEXT_PUBLIC_UNOPTIMIZED_IMAGES
+        value: false
+      - key: NEXT_PUBLIC_DISCORD_LINK
+        sync: false
+      - key: NEXT_PUBLIC_OSU_SERVER_LIST_LINK
+        sync: false
+      - key: NEXT_PUBLIC_KOFI_LINK
+        sync: false
+      - key: NEXT_PUBLIC_BOOSTY_LINK
+        sync: false
+      - key: NEXT_PUBLIC_STATUS_PAGE_LINK
+        sync: false
+    numInstances: 1
+
+  # ---------------------------------------------------------------
+  # Sunshine Discord Bot (Worker)
+  # ---------------------------------------------------------------
+  - type: worker
+    name: sunshine-discord-bot
+    runtime: docker
+    dockerfilePath: ./Sunshine/Dockerfile
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: NEW_SCORES_CHANNED_ID
+        sync: false
+      - key: BEATMAPS_STATUSES_CHANNED_ID
+        sync: false
+      - key: SUNRISE_URI
+        value: sunset-website.onrender.com
+      - key: NODE_ENV
+        value: prod
+    numInstances: 1
+
+  # ---------------------------------------------------------------
+  # Grafana Dashboard (Optional - uncomment to enable)
+  # ---------------------------------------------------------------
+  # - type: web
+  #   name: grafana
+  #   runtime: image
+  #   image:
+  #     url: grafana/grafana:12.3
+  #   envVars:
+  #     - key: GF_SECURITY_ADMIN_PASSWORD
+  #       sync: false
+  #     - key: GF_SERVER_ROOT_URL
+  #       value: https://grafana.onrender.com
+  #   healthCheckPath: /api/health
+  #   numInstances: 1
+
+databases:
+  - name: observatory-postgres
+    plan: starter
+    postgresMajorVersion: 17
+
+# Create two Redis instances manually in the Render Dashboard:
+#   - sunrise-redis  (for Sunrise caching)
+#   - observatory-redis  (for Observatory caching)
+# Set their internal connection strings as env vars on each service.

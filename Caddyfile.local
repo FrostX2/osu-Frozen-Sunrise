@@ -1,0 +1,15 @@
+{
+    auto_https off
+}
+
+c.sunrise.local:80, osu.sunrise.local:80, cho.sunrise.local:80, c4.sunrise.local:80, a.sunrise.local:80, b.sunrise.local:80, assets.sunrise.local:80 {
+    reverse_proxy localhost:3912
+}
+
+api.sunrise.local:80 {
+    reverse_proxy localhost:3912
+}
+
+sunrise.local:80 {
+    reverse_proxy localhost:3090
+}

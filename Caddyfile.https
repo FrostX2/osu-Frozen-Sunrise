@@ -1,0 +1,16 @@
+{
+    auto_https off
+}
+
+c.sunrise.local:443, osu.sunrise.local:443, cho.sunrise.local:443, c4.sunrise.local:443, a.sunrise.local:443, b.sunrise.local:443, assets.sunrise.local:443, api.sunrise.local:443, sunrise.local:443 {
+    tls /tmp/wildcard-cert.pem /tmp/wildcard-key.pem
+    reverse_proxy localhost:3912
+}
+
+c.sunrise.local:80, osu.sunrise.local:80, cho.sunrise.local:80, c4.sunrise.local:80, a.sunrise.local:80, b.sunrise.local:80, assets.sunrise.local:80, api.sunrise.local:80 {
+    reverse_proxy localhost:3912
+}
+
+sunrise.local:80 {
+    reverse_proxy localhost:3090
+}

@@ -1,12 +1,41 @@
-name: osu-sunrise-infrastructure
+# -- This docker-compose file is intended for hosting Sunrise on a public web server with a real domain.
+# -- Caddy automatically provisions Let's Encrypt HTTPS certificates for your domain.
+# -- Set WEB_DOMAIN=yourdomain.com in .env and ensure DNS A records point to your server.
+
+name: osu-sunrise-web-infrastructure
 services:
+  # --- Reverse Proxy ---
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./Caddyfile.web:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN}
+      SUNRISE_SERVER_PORT: ${SUNRISE_SERVER_PORT}
+      SUNSET_PORT: 3000
+      OBSERVATORY_PORT: 3000
+      GRAFANA_PORT: 3000
+    networks:
+      - container_network
+    depends_on:
+      sunrise-server:
+        condition: service_healthy
+      sunset-website:
+        condition: service_started
+
   # --- Application ---
   sunrise-server:
     build:
       context: ./Sunrise
       dockerfile: Dockerfile
-    ports:
-      - ${SUNRISE_SERVER_PORT}:${SUNRISE_SERVER_PORT}
+    expose:
+      - ${SUNRISE_SERVER_PORT}
     volumes:
       - ./Sunrise/Data:/app/Data
       - ./Sunrise.Config.Production.json:/app/appsettings.Production.json
@@ -18,8 +47,6 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:${SUNRISE_SERVER_PORT};http://+:5147
-
-      OTEL_DOTNET_EXPERIMENTAL_ASPNETCORE_DISABLE_URL_QUERY_REDACTION: true
       WEB_DOMAIN: ${WEB_DOMAIN}
       API_TOKEN_SECRET: ${SUNRISE_API_TOKEN_SECRET}
       OBSERVATORY_HOST: observatory
@@ -88,10 +115,10 @@ services:
       ENABLE_CRON_TO_CLEAR_OUTDATED_BEATMAPS: ${OBSERVATORY_ENABLE_CRON_TO_CLEAR_OUTDATED_BEATMAPS}
       SHOW_INTERNAL_VALUES_IN_PUBLIC_STATS_ENDPOINT: ${OBSERVATORY_SHOW_INTERNAL_VALUES_IN_PUBLIC_STATS_ENDPOINT}
       USE_US_CATBOY_SERVER_ONLY: ${OBSERVATORY_USE_US_CATBOY_SERVER_ONLY}
+    expose:
+      - 3000
     networks:
       - container_network
-    ports:
-      - ${OBSERVATORY_PORT}:3000
     depends_on:
       loki:
         condition: service_started
@@ -117,7 +144,7 @@ services:
       dockerfile: ../lib/docker/Sunset.Dockerfile
       args:
         NEXT_PUBLIC_SERVER_DOMAIN: ${WEB_DOMAIN}
-        NEXT_PUBLIC_UNOPTIMIZED_IMAGES: true
+        NEXT_PUBLIC_UNOPTIMIZED_IMAGES: false
         NEXT_PUBLIC_DISCORD_LINK: ${SUNSET_NEXT_PUBLIC_DISCORD_LINK}
         NEXT_PUBLIC_OSU_SERVER_LIST_LINK: ${SUNSET_NEXT_PUBLIC_OSU_SERVER_LIST_LINK}
         NEXT_PUBLIC_KOFI_LINK: ${SUNSET_NEXT_PUBLIC_KOFI_LINK}
@@ -128,9 +155,9 @@ services:
     restart: unless-stopped
     environment:
       - WEB_DOMAIN=${WEB_DOMAIN}
-      - NEXT_PUBLIC_UNOPTIMIZED_IMAGES=true
-    ports:
-      - ${SUNSET_PORT}:3000
+      - NEXT_PUBLIC_UNOPTIMIZED_IMAGES=false
+    expose:
+      - 3000
     deploy:
       resources:
         limits:
@@ -139,6 +166,8 @@ services:
         reservations:
           cpus: "0.1"
           memory: 64M
+    networks:
+      - container_network
 
   sunshine-discord-bot:
     build:
@@ -161,6 +190,8 @@ services:
         reservations:
           cpus: "0.2"
           memory: 128M
+    networks:
+      - container_network
 
   ## --- Databases ---
 
@@ -206,9 +237,6 @@ services:
       MYSQL_DATABASE: ${SUNRISE_MYSQL_DATABASE}
     volumes:
       - mysql_data:/var/lib/mysql
-    # ports:
-    #   - ${SUNRISE_MYSQL_PORT}:3306
-    # We don't expose MySQL to the host for security reasons, but you can still connect to it from the host using `docker exec`. You are free to uncomment the above lines if you want to expose it to the host.
     networks:
       - container_network
     command:
@@ -227,9 +255,6 @@ services:
       POSTGRES_USER: ${OBSERVATORY_POSTGRES_USER}
       POSTGRES_PASSWORD: ${OBSERVATORY_POSTGRES_PASSWORD}
       POSTGRES_DB: ${OBSERVATORY_POSTGRES_DB}
-    # ports:
-    #   - ${OBSERVATORY_POSTGRES_PORT}:5432
-    # We don't expose Postgres to the host for security reasons, but you can still connect to it from the host using `docker exec`. You are free to uncomment the above lines if you want to expose it to the host.
     volumes:
       - observatory_data:/var/lib/postgresql/data:Z
     networks:
@@ -295,7 +320,6 @@ services:
     command:
       - --docker_only=true
       - --disable_root_cgroup_stats=true
-      # - --enable_load_reader=true # https://github.com/google/cadvisor/issues/3430
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw
@@ -350,15 +374,14 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - ${GRAFANA_PORT}:3000
+      - GF_SERVER_ROOT_URL=https://grafana.${WEB_DOMAIN}
+    expose:
+      - 3000
     networks:
       - container_network
     depends_on:
       victoria-metrics:
         condition: service_healthy
-#    tempo:
-#       condition: service_started
       loki:
         condition: service_started
       cadvisor:
@@ -382,21 +405,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # Uncomment if you want to use Uptime-Kuma for monitoring
-  #uptime-kuma:
-  #  image: louislam/uptime-kuma:2
-  #  restart: unless-stopped
-  #  volumes:
-  #    - /database/uptime-kuma-data:/app/data
-  #  ports:
-  #    - ${UPTIME_KUMA_PORT-3001}:3001
-  #  deploy:
-  #    resources:
-  #      limits:
-  #        memory: 256M
-  #      reservations:
-  #        memory: 64M
-
 volumes:
   mysql_data:
   observatory_redis_data:
@@ -406,6 +414,8 @@ volumes:
   grafana_data:
   victoria_metrics_data:
   observatory_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   container_network:
