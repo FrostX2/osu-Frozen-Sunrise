@@ -191,3 +191,4 @@ To make your server accessible on the internet:
 
 If you want to contribute to the project, feel free to fork the repository and submit a pull request. We are open to any
 suggestions and improvements.
+# Sunrise-render-hosted
