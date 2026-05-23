@@ -123,7 +123,7 @@ services:
       - key: POSTGRES_HOST
         fromDatabase:
           name: observatory-postgres
-          property: hostname
+          property: host
       - key: POSTGRES_PORT
         fromDatabase:
           name: observatory-postgres
